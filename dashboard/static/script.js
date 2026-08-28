@@ -1,4 +1,3 @@
-
 // --- GLOBAL CUSTOM DROPDOWN LOGIC ---
 document.addEventListener('focusin', (e) => {
     if (e.target.classList && e.target.classList.contains('custom-autocomplete-input')) {
@@ -23,6 +22,7 @@ document.addEventListener('DOMContentLoaded', () => {
     fetchTaxonomy();
     setupModal();
     setupTreeSearch();
+    setupAdvancedFilters();
     setupFilters();
     setupViewerStaticEvents();
     setupImportModal();
@@ -34,11 +34,16 @@ function setupViewerStaticEvents() {
             showBoxes = !showBoxes;
             e.target.className = showBoxes ? 'bx bx-show' : 'bx bx-hide';
             renderSingleImage(currentSelectedIndex, true);
-        } else if (e.target.id === 'btn-toggle-drawer') {
+        } else if (e.target.closest('#btn-toggle-drawer')) {
             const drawer = document.getElementById('stats-drawer');
-            if (drawer) {
+            const btn = e.target.closest('#btn-toggle-drawer');
+            if (drawer && btn) {
                 drawer.classList.toggle('open');
-                e.target.className = drawer.classList.contains('open') ? 'bx bxs-up-arrow' : 'bx bxs-down-arrow';
+                const icon = btn.querySelector('.toggle-icon');
+                if (icon) {
+                    icon.className = drawer.classList.contains('open') ? 'bx bx-chevron-down toggle-icon' : 'bx bx-chevron-up toggle-icon';
+                }
+                btn.classList.toggle('active', drawer.classList.contains('open'));
             }
         } else if (e.target.id === 'btn-reset-view') {
             scale = 1;
@@ -146,6 +151,339 @@ function setupTreeSearch() {
     }
 }
 
+let lastClassDistribution = {};
+
+const HALCON_CLASS_COLORS = [
+    '#e6194b', '#f58231', '#ffe119', '#3cb44b', '#42d4f4',
+    '#4363d8', '#911eb4', '#f032e6', '#00f3ff', '#dcbeff',
+    '#9a6324', '#aaffc3', '#808000', '#ffd8b1', '#000075'
+];
+
+function setupAdvancedFilters() {
+    const btnToggle = document.getElementById('btn-toggle-filters');
+    const panel = document.getElementById('advanced-filters-panel');
+    const btnClose = document.getElementById('btn-close-organizer');
+    const btnApply = document.getElementById('btn-apply-filters');
+    const btnClear = document.getElementById('btn-clear-filters');
+    const cbAnyClass = document.getElementById('cb-any-class');
+    const cbUnlabeled = document.getElementById('cb-unlabeled');
+    const dynamicContainer = document.getElementById('halcon-classes-dynamic');
+    
+    if (!btnToggle || !panel) return;
+    
+    // Toggle panel
+    const togglePanel = async (forceShow) => {
+        const isVisible = panel.style.display !== 'none';
+        if (typeof forceShow === 'boolean') {
+            panel.style.display = forceShow ? 'flex' : 'none';
+        } else {
+            panel.style.display = isVisible ? 'none' : 'flex';
+        }
+        
+        btnToggle.classList.toggle('filter-active', panel.style.display !== 'none');
+        
+        if (panel.style.display !== 'none') {
+            await populateFilters();
+        }
+    };
+    
+    btnToggle.addEventListener('click', togglePanel);
+    if (btnClose) btnClose.addEventListener('click', () => togglePanel(false));
+    
+    let filtersLoaded = false;
+    
+    async function populateFilters() {
+        if (filtersLoaded) return;
+        try {
+            const res = await fetch('/api/taxonomy-options');
+            const data = await res.json();
+            if (data.status !== 'success') return;
+            
+            const opts = data.options;
+            renderGenericChecklist('list-control-type', 'cb-ctrl', opts.control_type || []);
+            renderGenericChecklist('list-station', 'cb-sta', opts.station || []);
+            renderGenericChecklist('list-machine-serial', 'cb-ser', opts.machine_serial || []);
+            renderGenericChecklist('list-format-type', 'cb-fmt', opts.format_type || []);
+            
+            window.allTaxonomyClasses = opts.class_name || [];
+            renderClassChecklist(opts.class_name || []);
+            filtersLoaded = true;
+        } catch (err) {
+            console.error('Errore popolamento filtri:', err);
+        }
+    }
+    
+    function triggerFilters() {
+        // Debounce if necessary, or just run it
+        if(btnApply) btnApply.click();
+    }
+    
+    function renderGenericChecklist(containerId, prefix, items) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+        container.innerHTML = '';
+        items.forEach((item, i) => {
+            const id = `${prefix}-${i}`;
+            const div = document.createElement('div');
+            div.className = 'halcon-class-item';
+            div.innerHTML = `
+                <input type="checkbox" id="${id}" class="halcon-cb ${prefix}-cb" data-val="${item}" checked style="--cb-color: var(--primary-color);">
+                <span class="halcon-color-swatch" style="background: var(--primary-color);"></span>
+                <label for="${id}" class="halcon-class-name">${item}</label>
+            `;
+            container.appendChild(div);
+            
+            const cb = div.querySelector('input');
+            div.addEventListener('click', (e) => {
+                if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'LABEL' && !div.classList.contains('disabled-facet')) {
+                    cb.checked = !cb.checked;
+                    triggerFilters();
+                }
+            });
+            cb.addEventListener('change', () => {
+                triggerFilters();
+            });
+        });
+    }
+    
+    function renderClassChecklist(classes) {
+        if (!dynamicContainer) return;
+        dynamicContainer.innerHTML = '';
+        classes.forEach((cls, i) => {
+            const color = HALCON_CLASS_COLORS[i % HALCON_CLASS_COLORS.length];
+            const id = `cb-class-${i}`;
+            
+            const item = document.createElement('div');
+            item.className = 'halcon-class-item';
+            item.innerHTML = `
+                <input type="checkbox" id="${id}" class="halcon-cb halcon-class-cb" data-class="${cls}" checked style="--cb-color: ${color};">
+                <span class="halcon-color-swatch" style="background: ${color};"></span>
+                <label for="${id}" class="halcon-class-name">${cls}</label>
+            `;
+            
+            dynamicContainer.appendChild(item);
+            
+            const cb = item.querySelector('.halcon-class-cb');
+            
+            cb.addEventListener('change', () => {
+                syncAnyClassToggle();
+                triggerFilters();
+            });
+            
+            item.addEventListener('click', (e) => {
+                if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'LABEL' && !item.classList.contains('disabled-facet')) {
+                    cb.checked = !cb.checked;
+                    syncAnyClassToggle();
+                    triggerFilters();
+                }
+            });
+        });
+    }
+    
+    function syncAnyClassToggle() {
+        const allCbs = document.querySelectorAll('.halcon-class-cb');
+        const allChecked = Array.from(allCbs).every(cb => cb.checked);
+        const noneChecked = Array.from(allCbs).every(cb => !cb.checked);
+        if(cbAnyClass) {
+            cbAnyClass.checked = allChecked;
+            cbAnyClass.indeterminate = !allChecked && !noneChecked;
+        }
+    }
+    
+    if (cbAnyClass) {
+        cbAnyClass.addEventListener('change', () => {
+            const checked = cbAnyClass.checked;
+            document.querySelectorAll('.halcon-class-cb').forEach(cb => {
+                cb.checked = checked;
+            });
+            triggerFilters();
+        });
+    }
+    if (cbUnlabeled) {
+        cbUnlabeled.addEventListener('change', () => {
+            triggerFilters();
+        });
+        const unlItem = cbUnlabeled.closest('.halcon-class-item');
+        if(unlItem) {
+            unlItem.addEventListener('click', (e) => {
+                if(e.target.tagName !== 'INPUT' && e.target.tagName !== 'LABEL' && !unlItem.classList.contains('disabled-facet')) {
+                    triggerFilters();
+                }
+            });
+        }
+    }
+    
+    const getCheckedValues = (selector) => {
+        return Array.from(document.querySelectorAll(selector + ':checked')).map(cb => cb.dataset.val);
+    };
+    
+    // Apply filters
+    if (btnApply) {
+        btnApply.style.display = 'none'; // Hide apply button since it's auto-updating
+        
+        btnApply.addEventListener('click', async () => {
+            const controlTypes = getCheckedValues('.cb-ctrl-cb');
+            const stations = getCheckedValues('.cb-sta-cb');
+            const machineSerials = getCheckedValues('.cb-ser-cb');
+            const formatTypes = getCheckedValues('.cb-fmt-cb');
+            
+            const selectedClasses = [];
+            document.querySelectorAll('.halcon-class-cb:checked').forEach(cb => {
+                selectedClasses.push(cb.dataset.class);
+            });
+            
+            const includeUnlabeled = cbUnlabeled && cbUnlabeled.checked;
+            
+            const payload = {
+                control_types: controlTypes,
+                stations: stations,
+                machine_serials: machineSerials,
+                format_types: formatTypes,
+                classes: selectedClasses,
+                include_unlabeled: includeUnlabeled
+            };
+            
+            btnApply.disabled = true;
+            
+            try {
+                // Fetch facets first to update UI quickly
+                fetch('/api/facets', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                }).then(res => res.json()).then(data => {
+                    if(data.status === 'success') {
+                        const f = data.facets;
+                        
+                        const updateFacet = (selector, availableSet) => {
+                            document.querySelectorAll(selector).forEach(cb => {
+                                const val = cb.dataset.val || cb.dataset.class;
+                                const item = cb.closest('.halcon-class-item');
+                                if(!availableSet.includes(val)) {
+                                    item.classList.add('disabled-facet');
+                                    item.style.opacity = '0.3';
+                                } else {
+                                    item.classList.remove('disabled-facet');
+                                    item.style.opacity = '1';
+                                }
+                            });
+                        };
+                        
+                        updateFacet('.cb-ctrl-cb', f.control_type);
+                        updateFacet('.cb-sta-cb', f.station);
+                        updateFacet('.cb-ser-cb', f.machine_serial);
+                        updateFacet('.cb-fmt-cb', f.format_type);
+                        updateFacet('.halcon-class-cb', f.class_name);
+                        
+                        const unlItem = cbUnlabeled ? cbUnlabeled.closest('.halcon-class-item') : null;
+                        if(unlItem) {
+                            if(!f.unlabeled_available) {
+                                unlItem.classList.add('disabled-facet');
+                                unlItem.style.opacity = '0.3';
+                            } else {
+                                unlItem.classList.remove('disabled-facet');
+                                unlItem.style.opacity = '1';
+                            }
+                        }
+                    }
+                });
+                
+                // Fetch search results
+                const response = await fetch('/api/search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    lastClassDistribution = data.class_distribution || {};
+                    
+                    const bc = document.getElementById('breadcrumb');
+                    bc.innerHTML = `<i class="bx bx-filter-alt" style="margin-right: 4px;"></i> Risultati Data Organizer <span style="color: var(--text-muted); font-size: 0.85rem;">(${data.total} immagini)</span>`;
+                    
+                    const images = data.images;
+                    currentImages = images;
+                    
+                    const stats = document.getElementById('gallery-stats');
+                    stats.textContent = `${images.length} immagini trovate`;
+                    
+                    const imageList = document.getElementById('image-list');
+                    const emptyState = document.getElementById('viewer-empty-state');
+                    
+                    if (images.length === 0) {
+                        emptyState.style.display = 'block';
+                        emptyState.textContent = 'Nessuna immagine corrisponde ai filtri.';
+                        document.getElementById('viewport-card').style.display = 'none';
+                        imageList.innerHTML = '<div class="empty-state" style="padding: 16px;">Nessun risultato</div>';
+                        updateChart();
+                        return;
+                    }
+                    
+                    imageList.innerHTML = '';
+                    images.forEach((img, index) => {
+                        const item = document.createElement('div');
+                        item.className = 'image-list-item';
+                        item.title = img.file_name;
+                        item.id = `img-item-${index}`;
+                        item.onclick = () => renderSingleImage(index);
+                        
+                        const textSpan = document.createElement('span');
+                        textSpan.textContent = `Sample #${String(index + 1).padStart(3, '0')}`;
+                        
+                        const badgeContainer = document.createElement('div');
+                        badgeContainer.style.display = 'flex';
+                        badgeContainer.style.gap = '8px';
+                        
+                        const badgeSpan = document.createElement('span');
+                        badgeSpan.className = 'meta-tag';
+                        badgeSpan.textContent = `${img.width || '?'}x${img.height || '?'}`;
+                        
+                        const badgeSpan2 = document.createElement('span');
+                        badgeSpan2.className = 'meta-tag';
+                        const detMode = ['UNANNOTATED', 'NESSUNA_ANNOTAZIONE', 'RAW', 'UNLABELED'].includes(img.detection_mode) ? 'RAW' : 'LBL';
+                        badgeSpan2.textContent = detMode;
+                        badgeSpan2.style.backgroundColor = detMode === 'RAW' ? 'rgba(255,255,255,0.1)' : 'rgba(3, 243, 255, 0.2)';
+                        
+                        badgeContainer.appendChild(badgeSpan);
+                        badgeContainer.appendChild(badgeSpan2);
+                        item.appendChild(textSpan);
+                        item.appendChild(badgeContainer);
+                        imageList.appendChild(item);
+                    });
+                    
+                    renderSingleImage(0);
+                    updateChart();
+                    
+                } else {
+                    alert('Errore ricerca: ' + (data.message || 'Sconosciuto'));
+                }
+            } catch (err) {
+                console.error('Errore ricerca:', err);
+                alert('Errore di rete durante la ricerca.');
+            } finally {
+                btnApply.disabled = false;
+            }
+        });
+    }
+    
+    // Clear filters
+    if (btnClear) {
+        btnClear.style.width = '100%';
+        btnClear.innerHTML = '<i class="bx bx-reset"></i> Resetta Tutto';
+        btnClear.addEventListener('click', () => {
+            document.querySelectorAll('.halcon-cb').forEach(cb => cb.checked = true);
+            if(cbUnlabeled) cbUnlabeled.checked = false;
+            if(cbAnyClass) {
+                cbAnyClass.checked = true;
+                cbAnyClass.indeterminate = false;
+            }
+            lastClassDistribution = {};
+            triggerFilters();
+        });
+    }
+}
+
 function setupFilters() {
     const pills = document.querySelectorAll('.pill');
     pills.forEach(pill => {
@@ -229,7 +567,7 @@ async function fetchTaxonomy() {
 }
 
 // 2. Build Recursive Tree DOM
-function buildTree(nodeData, levelNames, currentLevelIndex) {
+function buildTree(nodeData, levelNames, currentLevelIndex, parentPath = '') {
     const container = document.createElement('div');
     container.className = 'tree-children';
     // Il primo livello è sempre visibile
@@ -246,14 +584,16 @@ function buildTree(nodeData, levelNames, currentLevelIndex) {
     if (Array.isArray(nodeData)) {
         // È il livello foglia (folder_class)
         nodeData.forEach(leafVal => {
-            const nodeEl = createNodeElement(leafVal, currentLevelName, true, leafVal, currentLevelIndex === 0, currentLevelIndex);
+            const currentPath = parentPath ? `${parentPath}/${leafVal}` : leafVal;
+            const nodeEl = createNodeElement(leafVal, currentLevelName, true, leafVal, currentLevelIndex === 0, currentLevelIndex, currentPath);
             container.appendChild(nodeEl);
         });
     } else {
         // Oggetto intermedio
         for (const [key, childData] of Object.entries(nodeData)) {
-            const nodeEl = createNodeElement(key, currentLevelName, false, null, currentLevelIndex === 0, currentLevelIndex);
-            const childrenEl = buildTree(childData, levelNames, currentLevelIndex + 1);
+            const currentPath = parentPath ? `${parentPath}/${key}` : key;
+            const nodeEl = createNodeElement(key, currentLevelName, false, null, currentLevelIndex === 0, currentLevelIndex, currentPath);
+            const childrenEl = buildTree(childData, levelNames, currentLevelIndex + 1, currentPath);
             nodeEl.appendChild(childrenEl);
             container.appendChild(nodeEl);
         }
@@ -262,11 +602,12 @@ function buildTree(nodeData, levelNames, currentLevelIndex) {
     return container;
 }
 
-function createNodeElement(value, levelName, isLeaf, leafVal = null, isLevelZero = false, levelIndex = 0) {
+function createNodeElement(value, levelName, isLeaf, leafVal = null, isLevelZero = false, levelIndex = 0, fullPath = '') {
     const node = document.createElement('div');
     node.className = 'tree-node';
     node.setAttribute('data-value', value);
     node.setAttribute('data-level', levelIndex);
+    node.setAttribute('data-path', fullPath);
     if (!isLevelZero) node.classList.add('sub-level');
 
     const label = document.createElement('div');
@@ -501,10 +842,20 @@ function updateChart() {
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            layout: {
+                padding: {
+                    right: 20
+                }
+            },
             plugins: {
                 legend: {
-                    position: 'left',
-                    labels: { color: '#ffffff', boxWidth: 12 }
+                    position: 'right',
+                    labels: { 
+                        color: '#ffffff', 
+                        boxWidth: 12,
+                        font: { size: 11 },
+                        padding: 15
+                    }
                 }
             }
         }
@@ -513,7 +864,7 @@ function updateChart() {
     // Aggiorna pannello info extra
     const extraInfo = document.getElementById('drawer-extra-info');
     if (extraInfo) {
-        extraInfo.innerHTML = `
+        let html = `
             <h3 style="color: white; margin-bottom: 12px; font-weight: 600; font-size: 1.1rem;">Riepilogo Dataset</h3>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
                 <div>
@@ -539,6 +890,45 @@ function updateChart() {
                 <div style="margin-top: 4px;"><strong>Date Acquisizione:</strong> ${Array.from(uniqueDates).join(', ') || 'N/D'}</div>
             </div>
         `;
+        
+        // Imbalance Bars (from class_distribution or from folder_class counts)
+        const distSource = Object.keys(lastClassDistribution).length > 0 ? lastClassDistribution : classCounts;
+        const distEntries = Object.entries(distSource);
+        
+        if (distEntries.length > 0) {
+            const totalAnnotations = distEntries.reduce((sum, [, cnt]) => sum + cnt, 0);
+            const maxCount = Math.max(...distEntries.map(([, cnt]) => cnt));
+            
+            html += `<div class="imbalance-section">
+                <h4><i class='bx bx-bar-chart-alt-2' style="color: #00f3ff;"></i> Distribuzione Classi</h4>`;
+            
+            distEntries.forEach(([className, count]) => {
+                const pct = totalAnnotations > 0 ? (count / totalAnnotations * 100) : 0;
+                const barWidth = maxCount > 0 ? (count / maxCount * 100) : 0;
+                
+                let fillClass = '';
+                let valueClass = '';
+                if (pct < 2) {
+                    fillClass = 'critical';
+                    valueClass = 'critical-text';
+                } else if (pct < 5) {
+                    fillClass = 'warning';
+                    valueClass = 'warning-text';
+                }
+                
+                html += `<div class="imbalance-bar">
+                    <span class="bar-label" title="${className}">${className}</span>
+                    <div class="bar-track">
+                        <div class="bar-fill ${fillClass}" style="width: ${barWidth}%;"></div>
+                    </div>
+                    <span class="bar-value ${valueClass}">${count} (${pct.toFixed(1)}%)</span>
+                </div>`;
+            });
+            
+            html += `</div>`;
+        }
+        
+        extraInfo.innerHTML = html;
     }
 }
 
@@ -624,41 +1014,40 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
+let currentImportStep = 1;
+let importFilters = {
+    hdict_file: '',
+    control_type: '',
+    station: '',
+    machine_serial: '',
+    format_type: '',
+    matricola: '',
+    delete_source: false
+};
+let importOptionsData = {
+    dicts: [],
+    control_type: [],
+    station: [],
+    machine_serial: [],
+    format_type: []
+};
+
 function setupImportModal() {
     const btnOpen = document.getElementById('btn-open-import');
     const modal = document.getElementById('import-modal');
-    const btnClose = document.querySelector('.close-import');
     const btnExecute = document.getElementById('btn-execute-import');
     const statusDiv = document.getElementById('import-status');
-    const hdictSelect = document.getElementById('hdict-select');
-    const btnRefresh = document.getElementById('btn-refresh-dicts');
+    const btnNext = document.getElementById('btn-import-next');
+    const btnPrev = document.getElementById('btn-import-prev');
 
     async function fetchDicts() {
-        if (!hdictSelect) return;
-        const dataList = document.getElementById('list-hdicts');
-        hdictSelect.placeholder = 'Caricamento dizionari...';
         try {
             const response = await fetch('/api/dropzone-dicts');
             const data = await response.json();
-            
-            if (dataList) dataList.innerHTML = '';
-            if (data.status === 'success' && data.files.length > 0) {
-                hdictSelect.placeholder = 'Seleziona dizionario...';
-                const htmlList = data.files.map(file => `<div class="custom-autocomplete-item" data-val="${file}">${file}</div>`).join('');
-                if (dataList) {
-                    dataList.innerHTML = htmlList;
-                    dataList.querySelectorAll('.custom-autocomplete-item').forEach(item => {
-                        item.addEventListener('click', (e) => {
-                            hdictSelect.value = e.target.dataset.val;
-                            dataList.classList.remove('show');
-                        });
-                    });
-                }
-            } else {
-                hdictSelect.placeholder = data.message || 'Nessun file .hdict trovato';
+            if (data.status === 'success') {
+                importOptionsData.dicts = data.files || [];
             }
         } catch (err) {
-            hdictSelect.placeholder = 'Errore di connessione';
             console.error(err);
         }
     }
@@ -668,49 +1057,270 @@ function setupImportModal() {
             const res = await fetch('/api/taxonomy-options');
             const data = await res.json();
             if (data.status === 'success') {
-                const populate = (id, items) => {
-                    const dl = document.getElementById(id);
-                    if (!dl) return;
-                    dl.innerHTML = '';
-                    items.forEach(val => {
-                        const opt = document.createElement('option');
-                        opt.value = val;
-                        dl.appendChild(opt);
-                    });
-                };
-                populate('list-control-type', data.options.control_type || []);
-                populate('list-station', data.options.station || []);
-                populate('list-machine-serial', data.options.machine_serial || []);
-                populate('list-format-type', data.options.format_type || []);
+                importOptionsData.control_type = data.options.control_type || [];
+                importOptionsData.station = data.options.station || [];
+                importOptionsData.machine_serial = data.options.machine_serial || [];
+                importOptionsData.format_type = data.options.format_type || [];
             }
         } catch (err) {
             console.error("Errore fetch taxonomy:", err);
         }
     }
 
-    if(btnRefresh) {
-        btnRefresh.addEventListener('click', fetchDicts);
-    }
-
     if(btnOpen && modal) {
-        btnOpen.addEventListener('click', () => {
-            if(document.getElementById('tax-control-type')) document.getElementById('tax-control-type').value = '';
-            if(document.getElementById('tax-station')) document.getElementById('tax-station').value = '';
-            if(document.getElementById('tax-machine-serial')) document.getElementById('tax-machine-serial').value = '';
-            if(document.getElementById('tax-format-type')) document.getElementById('tax-format-type').value = '';
-            if(document.getElementById('tax-matricola')) document.getElementById('tax-matricola').value = '';
-            statusDiv.textContent = '';
-            
+        btnOpen.addEventListener('click', async () => {
             modal.classList.add('show');
-            fetchDicts();
-            fetchTaxonomyOptions();
+            currentImportStep = 1;
+            importFilters = { hdict_file: '', control_type: '', station: '', machine_serial: '', format_type: '', matricola: '', delete_source: false };
+            
+            const btnExecute = document.getElementById('btn-execute-import');
+            btnExecute.style.display = 'none';
+            btnExecute.disabled = false;
+            
+            document.getElementById('import-status').textContent = 'Caricamento dati in corso...';
+            
+            await fetchDicts();
+            await fetchTaxonomyOptions();
+            document.getElementById('import-status').textContent = '';
+            renderImportStep(currentImportStep);
         });
     }
     
-    if(btnClose) {
-        btnClose.addEventListener('click', () => {
+    document.querySelectorAll('.close-import').forEach(btn => {
+        btn.addEventListener('click', () => {
             modal.classList.remove('show');
         });
+    });
+    
+    if (btnNext) {
+        btnNext.addEventListener('click', () => {
+            if (currentImportStep === 1) {
+                const selected = document.querySelector('#import-step-content .export-option-card.selected');
+                if (!selected) { alert('Seleziona un Dizionario'); return; }
+                importFilters.hdict_file = selected.dataset.value;
+            } else if (currentImportStep === 2) {
+                const selected = document.querySelector('#import-step-content .export-option-card.selected');
+                const customInput = document.getElementById('custom-control-type').value.trim();
+                if (customInput) {
+                    importFilters.control_type = customInput;
+                } else if (selected) {
+                    importFilters.control_type = selected.dataset.value;
+                } else {
+                    alert('Seleziona o inserisci un Tipo Controllo'); return;
+                }
+            } else if (currentImportStep === 3) {
+                const selStation = document.querySelector('#import-step-content .export-option-card.station-card.selected');
+                const customStation = document.getElementById('custom-station').value.trim();
+                if (customStation) {
+                    importFilters.station = customStation;
+                } else if (selStation) {
+                    importFilters.station = selStation.dataset.value;
+                } else {
+                    alert('Seleziona o inserisci una Stazione'); return;
+                }
+
+                const selSerial = document.querySelector('#import-step-content .export-option-card.serial-card.selected');
+                const customSerial = document.getElementById('custom-serial').value.trim();
+                if (customSerial) {
+                    importFilters.machine_serial = customSerial;
+                } else if (selSerial) {
+                    importFilters.machine_serial = selSerial.dataset.value;
+                } else {
+                    alert('Seleziona o inserisci un Seriale Macchina'); return;
+                }
+            }
+            
+            if (currentImportStep < 4) {
+                currentImportStep++;
+                renderImportStep(currentImportStep);
+            }
+        });
+    }
+
+    if (btnPrev) {
+        btnPrev.addEventListener('click', () => {
+            if (currentImportStep > 1) {
+                currentImportStep--;
+                renderImportStep(currentImportStep);
+            }
+        });
+    }
+
+    function renderImportStep(step) {
+        const container = document.getElementById('import-step-content');
+        
+        document.querySelectorAll('#import-wizard-timeline .wizard-step').forEach(el => {
+            const s = parseInt(el.dataset.step);
+            el.classList.remove('active', 'completed');
+            if (s === step) el.classList.add('active');
+            else if (s < step) el.classList.add('completed');
+        });
+
+        document.getElementById('btn-import-prev').style.display = step > 1 ? 'block' : 'none';
+        document.getElementById('btn-import-next').style.display = step < 4 ? 'block' : 'none';
+        document.getElementById('btn-execute-import').style.display = step === 4 ? 'flex' : 'none';
+        
+        let html = '';
+        if (step === 1) {
+            html += `<h3 style="margin-top:0; color:var(--text-color);">Seleziona Dizionario (.hdict)</h3>`;
+            html += `<div class="export-options-grid">`;
+            importOptionsData.dicts.forEach(opt => {
+                html += `<div class="export-option-card single-select" data-value="${opt}">${opt}</div>`;
+            });
+            html += `</div>`;
+            if (importOptionsData.dicts.length === 0) {
+                html += `<p style="color:var(--text-muted); margin-top: 16px;">Nessun dizionario trovato. Ricarica o aggiungi file nella DropZone.</p>`;
+            }
+        } else if (step === 2) {
+            html += `<h3 style="margin-top:0; color:var(--text-color);">Seleziona Tipo Controllo</h3>`;
+            html += `<div class="export-options-grid">`;
+            importOptionsData.control_type.forEach(opt => {
+                html += `<div class="export-option-card single-select" data-value="${opt}">${opt}</div>`;
+            });
+            html += `</div>`;
+            html += `<div style="margin-top: 24px;">
+                        <h4 style="color: rgba(255,255,255,0.7); margin-bottom: 8px;">Oppure inserisci nuovo:</h4>
+                        <input type="text" id="custom-control-type" class="glass-input" placeholder="+ Nuovo Tipo Controllo" style="width: 100%; max-width: 400px;">
+                     </div>`;
+        } else if (step === 3) {
+            html += `<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 32px;">`;
+            
+            html += `<div>
+                        <h3 style="margin-top:0; color:var(--text-color);">Stazione</h3>
+                        <div class="export-options-grid" style="grid-template-columns: 1fr;">`;
+            importOptionsData.station.forEach(opt => {
+                html += `<div class="export-option-card station-card single-select" data-value="${opt}">${opt}</div>`;
+            });
+            html += `   </div>
+                        <div style="margin-top: 16px;">
+                            <input type="text" id="custom-station" class="glass-input" placeholder="+ Nuova Stazione" style="width: 100%;">
+                        </div>
+                     </div>`;
+                     
+            html += `<div>
+                        <h3 style="margin-top:0; color:var(--text-color);">Seriale Macchina</h3>
+                        <div class="export-options-grid" style="grid-template-columns: 1fr;">`;
+            importOptionsData.machine_serial.forEach(opt => {
+                html += `<div class="export-option-card serial-card single-select" data-value="${opt}">${opt}</div>`;
+            });
+            html += `   </div>
+                        <div style="margin-top: 16px;">
+                            <input type="text" id="custom-serial" class="glass-input" placeholder="+ Nuovo Seriale" style="width: 100%;">
+                        </div>
+                     </div>`;
+                     
+            html += `</div>`;
+        } else if (step === 4) {
+            html += `<h3 style="margin-top:0; color:var(--text-color);">Seleziona Formato</h3>`;
+            html += `<div class="export-options-grid">`;
+            importOptionsData.format_type.forEach(opt => {
+                html += `<div class="export-option-card format-card single-select" data-value="${opt}">${opt}</div>`;
+            });
+            html += `</div>`;
+            html += `<div style="margin-top: 16px;">
+                        <input type="text" id="custom-format" class="glass-input" placeholder="+ Nuovo Formato" style="width: 100%; max-width: 400px;">
+                     </div>`;
+                     
+            html += `<div style="height: 1px; background: rgba(255,255,255,0.1); margin: 32px 0;"></div>`;
+            html += `<div class="input-wrapper" style="margin-bottom: 24px;">
+                        <input type="text" id="tax-matricola" class="glass-input" placeholder="Matricola / Lotto / Commento (Opzionale)" autocomplete="off" style="width: 100%; padding: 12px; font-size: 1.05rem;">
+                     </div>`;
+            html += `<label style="display: flex; align-items: center; gap: 10px; cursor: pointer; padding: 12px; background: rgba(239, 68, 68, 0.05); border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 8px; transition: background 0.2s; width: fit-content;">
+                        <input type="checkbox" id="delete-source" style="accent-color: #ef4444; width: 18px; height: 18px; cursor: pointer;">
+                        <span style="font-size: 0.9rem; color: #ef4444; font-weight: 500;">Svuota la cartella DropZone al termine dell'importazione</span>
+                     </label>`;
+        }
+        container.innerHTML = html;
+        
+        if (step === 1 || step === 2) {
+            container.querySelectorAll('.export-option-card.single-select').forEach(card => {
+                card.addEventListener('click', (e) => {
+                    container.querySelectorAll('.export-option-card.single-select').forEach(c => c.classList.remove('selected'));
+                    e.target.classList.add('selected');
+                    const customInput = container.querySelector('input[type="text"]');
+                    if (customInput) customInput.value = '';
+                });
+            });
+            const customInput = container.querySelector('input[type="text"]');
+            if (customInput) {
+                customInput.addEventListener('input', () => {
+                    container.querySelectorAll('.export-option-card.single-select').forEach(c => c.classList.remove('selected'));
+                });
+            }
+        } else if (step === 3) {
+            container.querySelectorAll('.station-card').forEach(card => {
+                card.addEventListener('click', (e) => {
+                    container.querySelectorAll('.station-card').forEach(c => c.classList.remove('selected'));
+                    e.target.classList.add('selected');
+                    document.getElementById('custom-station').value = '';
+                });
+            });
+            document.getElementById('custom-station').addEventListener('input', () => {
+                container.querySelectorAll('.station-card').forEach(c => c.classList.remove('selected'));
+            });
+
+            container.querySelectorAll('.serial-card').forEach(card => {
+                card.addEventListener('click', (e) => {
+                    container.querySelectorAll('.serial-card').forEach(c => c.classList.remove('selected'));
+                    e.target.classList.add('selected');
+                    document.getElementById('custom-serial').value = '';
+                });
+            });
+            document.getElementById('custom-serial').addEventListener('input', () => {
+                container.querySelectorAll('.serial-card').forEach(c => c.classList.remove('selected'));
+            });
+        } else if (step === 4) {
+            container.querySelectorAll('.format-card').forEach(card => {
+                card.addEventListener('click', (e) => {
+                    container.querySelectorAll('.format-card').forEach(c => c.classList.remove('selected'));
+                    e.target.classList.add('selected');
+                    document.getElementById('custom-format').value = '';
+                });
+            });
+            document.getElementById('custom-format').addEventListener('input', () => {
+                container.querySelectorAll('.format-card').forEach(c => c.classList.remove('selected'));
+            });
+            
+            // Save state on change for step 4 since there's no "next" step
+            document.getElementById('tax-matricola').addEventListener('input', (e) => {
+                importFilters.matricola = e.target.value.trim();
+            });
+            document.getElementById('delete-source').addEventListener('change', (e) => {
+                importFilters.delete_source = e.target.checked;
+            });
+        }
+        
+        if (step === 1 && importFilters.hdict_file) {
+            const card = container.querySelector(`.export-option-card[data-value="${importFilters.hdict_file}"]`);
+            if (card) card.classList.add('selected');
+        } else if (step === 2 && importFilters.control_type) {
+            const card = container.querySelector(`.export-option-card[data-value="${importFilters.control_type}"]`);
+            if (card) card.classList.add('selected');
+            else document.getElementById('custom-control-type').value = importFilters.control_type;
+        } else if (step === 3) {
+            if (importFilters.station) {
+                const card = container.querySelector(`.station-card[data-value="${importFilters.station}"]`);
+                if (card) card.classList.add('selected');
+                else document.getElementById('custom-station').value = importFilters.station;
+            }
+            if (importFilters.machine_serial) {
+                const card = container.querySelector(`.serial-card[data-value="${importFilters.machine_serial}"]`);
+                if (card) card.classList.add('selected');
+                else document.getElementById('custom-serial').value = importFilters.machine_serial;
+            }
+        } else if (step === 4) {
+            if (importFilters.format_type) {
+                const card = container.querySelector(`.format-card[data-value="${importFilters.format_type}"]`);
+                if (card) card.classList.add('selected');
+                else document.getElementById('custom-format').value = importFilters.format_type;
+            }
+            if (importFilters.matricola) {
+                document.getElementById('tax-matricola').value = importFilters.matricola;
+            }
+            if (importFilters.delete_source) {
+                document.getElementById('delete-source').checked = importFilters.delete_source;
+            }
+        }
     }
     
     const conflictModal = document.getElementById('conflict-modal');
@@ -720,9 +1330,7 @@ function setupImportModal() {
     
     const handleConflictCancel = () => {
         if (conflictModal) conflictModal.classList.remove('show');
-        const executeBtn = document.getElementById('btn-execute-import');
-        if (executeBtn) executeBtn.disabled = false;
-        const statusDiv = document.getElementById('import-status');
+        if (btnExecute) btnExecute.disabled = false;
         if (statusDiv) {
             statusDiv.textContent = 'Risoluzione conflitti annullata.';
             statusDiv.style.color = 'var(--text-muted)';
@@ -732,8 +1340,12 @@ function setupImportModal() {
     if (btnCloseConflict) btnCloseConflict.addEventListener('click', handleConflictCancel);
     if (btnCancelConflict) btnCancelConflict.addEventListener('click', handleConflictCancel);
     
-    // Funzione helper per l'importazione finale
     async function executeFinalImport(payload, btn, skipNavigation) {
+        const originalText = btn ? btn.textContent : '';
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = 'Importazione in corso (minuti)...';
+        }
         try {
             const response = await fetch('/api/import-network', {
                 method: 'POST',
@@ -747,17 +1359,15 @@ function setupImportModal() {
                 statusDiv.textContent = data.message;
                 statusDiv.style.color = 'var(--primary-color)';
                 
-                fetchDicts(); // refresh list after import
-                fetchTaxonomyOptions(); // refresh taxonomy
-                await fetchTaxonomy(); // refresh the sidebar tree
+                fetchDicts();
+                fetchTaxonomyOptions();
+                await fetchTaxonomy();
                 
-                // Chiudi modale dopo 1.5 secondi
                 setTimeout(() => {
                     modal.classList.remove('show');
                     if (conflictModal) conflictModal.classList.remove('show');
                     
                     if (!skipNavigation && data.data && data.data.final_taxonomy) {
-                        // Espandi la gerarchia verso il nuovo dataset (usando la tassonomia finale applicata)
                         const finalTax = data.data.final_taxonomy;
                         const pathArray = [finalTax.control_type, finalTax.station, finalTax.machine_serial, finalTax.format_type];
                         let currentContainer = document.getElementById('taxonomy-tree');
@@ -787,8 +1397,7 @@ function setupImportModal() {
                     }
                 }, 1500);
                 
-                // Reset fields except those usually persistent
-                document.getElementById('tax-matricola').value = '';
+                importFilters.matricola = ''; // reset matricola
             } else {
                 statusDiv.textContent = data.message || "Errore sconosciuto";
                 statusDiv.style.color = '#ef4444';
@@ -798,26 +1407,30 @@ function setupImportModal() {
             statusDiv.style.color = '#ef4444';
             console.error(error);
         } finally {
-            if (btn) btn.disabled = false;
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = originalText;
+            }
         }
     }
     
     if(btnExecute) {
         btnExecute.addEventListener('click', async () => {
-            if (hdictSelect && !hdictSelect.value) {
-                statusDiv.textContent = 'Nessun dizionario selezionato.';
-                statusDiv.style.color = '#ef4444';
-                return;
+            // Raccogli dati step 4
+            const selFormat = document.querySelector('#import-step-content .export-option-card.format-card.selected');
+            const customFormat = document.getElementById('custom-format').value.trim();
+            if (customFormat) {
+                importFilters.format_type = customFormat;
+            } else if (selFormat) {
+                importFilters.format_type = selFormat.dataset.value;
+            } else {
+                alert('Seleziona o inserisci un Formato'); return;
             }
+            importFilters.matricola = document.getElementById('tax-matricola').value.trim();
+            importFilters.delete_source = document.getElementById('delete-source').checked;
             
-            const ctrlType = document.getElementById('tax-control-type').value.trim();
-            const station = document.getElementById('tax-station').value.trim();
-            const serial = document.getElementById('tax-machine-serial').value.trim();
-            const format = document.getElementById('tax-format-type').value.trim();
-            const matricola = document.getElementById('tax-matricola').value.trim();
-            
-            if (!ctrlType || !station || !serial || !format) {
-                statusDiv.textContent = 'Compila tutti i campi tassonomici obbligatori (*).';
+            if (!importFilters.control_type || !importFilters.station || !importFilters.machine_serial || !importFilters.format_type) {
+                statusDiv.textContent = 'Mancano campi tassonomici obbligatori.';
                 statusDiv.style.color = '#ef4444';
                 return;
             }
@@ -826,18 +1439,15 @@ function setupImportModal() {
             statusDiv.textContent = 'Analisi dizionario in corso (Dry-Run)...';
             statusDiv.style.color = 'var(--text-muted)';
             
-            const deleteSource = document.getElementById('delete-source').checked;
-            const selectedFile = hdictSelect ? hdictSelect.value : "";
-            
             const payload = {
-                hdict_file: selectedFile, 
-                delete_source: deleteSource,
-                control_type: ctrlType,
-                station: station,
-                machine_serial: serial,
-                format_type: format,
-                matricola: matricola,
-                check_only: true, // Eseguiamo solo il check prima!
+                hdict_file: importFilters.hdict_file, 
+                delete_source: importFilters.delete_source,
+                control_type: importFilters.control_type,
+                station: importFilters.station,
+                machine_serial: importFilters.machine_serial,
+                format_type: importFilters.format_type,
+                matricola: importFilters.matricola,
+                check_only: true,
                 update_duplicates: false,
                 merge_new_with_old_date: false
             };
@@ -852,7 +1462,6 @@ function setupImportModal() {
                 const data = await response.json();
                 
                 if (data.status === 'success') {
-                    // Controllo Conflitti
                     if (data.duplicate_count > 0) {
                         statusDiv.textContent = 'Azione richiesta: Risoluzione Conflitti.';
                         statusDiv.style.color = '#f59e0b';
@@ -867,9 +1476,11 @@ function setupImportModal() {
                         
                         conflictModal.classList.add('show');
                         
-                        // Setup event listener per la conferma (rimuovi vecchi listener prima)
-                        const newConfirmBtn = btnConfirmConflict.cloneNode(true);
-                        btnConfirmConflict.parentNode.replaceChild(newConfirmBtn, btnConfirmConflict);
+                        const currentConfirmBtn = document.getElementById('btn-confirm-conflict');
+                        const newConfirmBtn = currentConfirmBtn.cloneNode(true);
+                        newConfirmBtn.disabled = false;
+                        newConfirmBtn.textContent = 'Conferma Importazione';
+                        currentConfirmBtn.parentNode.replaceChild(newConfirmBtn, currentConfirmBtn);
                         
                         newConfirmBtn.addEventListener('click', () => {
                             newConfirmBtn.disabled = true;
@@ -877,7 +1488,6 @@ function setupImportModal() {
                             
                             payload.check_only = false;
                             
-                            // Leggi le scelte dell'utente
                             const optDup = document.querySelector('input[name="opt-duplicates"]:checked').value;
                             payload.update_duplicates = (optDup === 'update');
                             
@@ -886,7 +1496,7 @@ function setupImportModal() {
                                 payload.merge_new_with_old_date = (optNew === 'merge');
                             }
                             
-                            statusDiv.textContent = 'Import finale in corso, attendere... (il processo potrebbe richiedere alcuni minuti)';
+                            statusDiv.textContent = 'Import finale in corso, attendere...';
                             statusDiv.style.color = 'var(--text-muted)';
                             
                             const skipNav = (data.new_count === 0 && !payload.update_duplicates);
@@ -894,13 +1504,12 @@ function setupImportModal() {
                         });
                         
                     } else {
-                        // Zero doppioni, vai liscio!
-                        statusDiv.textContent = 'Nessun conflitto rilevato. Import in corso, attendere...';
+                        statusDiv.textContent = 'Nessun conflitto rilevato. Import in corso...';
                         payload.check_only = false;
                         executeFinalImport(payload, btnExecute, false);
                     }
                 } else {
-                    statusDiv.textContent = data.message || "Errore sconosciuto durante l'analisi";
+                    statusDiv.textContent = data.message || "Errore sconosciuto";
                     statusDiv.style.color = '#ef4444';
                     btnExecute.disabled = false;
                 }
@@ -1026,19 +1635,37 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             
-            nameModal.classList.remove('show');
-            document.getElementById('export-modal').classList.remove('show'); // Chiudi anche il wizard base
-            
             const payload = {
                 export_name: exportName,
                 filters: exportFilters,
                 class_mapping: classMapping
             };
+            
+            btnConfirmExportName.disabled = true;
+            btnConfirmExportName.textContent = 'Esportazione in corso...';
 
-            console.log("=== DATASET BUILDER PAYLOAD ===");
-            console.log(JSON.stringify(payload, null, 2));
-            console.log("===============================");
-            alert(`Payload di export "${exportName}" generato! Controlla la console.`);
+            fetch('/api/export-dataset', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    nameModal.classList.remove('show');
+                    document.getElementById('export-modal').classList.remove('show'); // Chiudi il wizard
+                    alert(`✅ Esportazione Completata!\n${data.message}\nImmagini esportate: ${data.exported_count}\nClassi esportate: ${data.classes.join(', ')}`);
+                } else {
+                    alert(`❌ Errore durante l'esportazione:\n${data.message}`);
+                }
+            })
+            .catch(err => {
+                alert(`❌ Errore di connessione:\n${err.message}`);
+            })
+            .finally(() => {
+                btnConfirmExportName.disabled = false;
+                btnConfirmExportName.textContent = 'Conferma Nome';
+            });
         });
     }
 });

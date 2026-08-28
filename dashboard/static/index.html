@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DL-Vault - Halcon Dataset Engine</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="stylesheet" href="/static/styles.css?v=1787840137&old=1787840137">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
     <!-- Boxicons CDN -->
@@ -44,11 +45,101 @@
             <!-- Sidebar Navigation -->
             <aside class="sidebar glass">
                 <div class="tree-search-box">
-                    <i class="bx bx-search"></i>
-                    <input type="text" id="tree-search" placeholder="Cerca lotto, data, classe...">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <div style="flex: 1; position: relative;">
+                            <i class="bx bx-search" style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--text-muted); font-size: 1.1rem;"></i>
+                            <input type="text" id="tree-search" placeholder="Cerca lotto, data, classe..." style="padding-left: 36px;">
+                        </div>
+                        <button id="btn-toggle-filters" class="glass-btn" style="padding: 8px 10px; border-radius: 8px; font-size: 1.1rem; cursor: pointer; flex-shrink: 0; display: flex; align-items: center; justify-content: center;" title="Data Organizer">
+                            <i class='bx bx-filter-alt'></i>
+                        </button>
+                    </div>
                 </div>
                 <div id="taxonomy-tree" class="tree-container">
                     <div class="loading">Caricamento tassonomia...</div>
+                </div>
+            </aside>
+
+            <!-- Data Organizer Sidebar (Right of File Manager) -->
+            <aside id="advanced-filters-panel" class="glass data-organizer-sidebar" style="display: none;">
+                <div class="organizer-header">
+                    <h3><i class='bx bx-filter-alt'></i> Data Organizer</h3>
+                    <button id="btn-close-organizer" class="icon-btn" style="background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 1.5rem; transition: color 0.2s;"><i class='bx bx-x'></i></button>
+                </div>
+                
+                <div class="organizer-body">
+                    <!-- Controllo Section -->
+                    <div class="organizer-section">
+                        <div class="organizer-section-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                            <span>Controllo</span> <i class='bx bx-chevron-down'></i>
+                        </div>
+                        <div class="organizer-section-content halcon-class-list" id="list-control-type">
+                            <div class="loading-mini">Caricamento...</div>
+                        </div>
+                    </div>
+                    
+                    <!-- Stazione Section -->
+                    <div class="organizer-section">
+                        <div class="organizer-section-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                            <span>Stazione</span> <i class='bx bx-chevron-down'></i>
+                        </div>
+                        <div class="organizer-section-content halcon-class-list" id="list-station">
+                            <div class="loading-mini">Caricamento...</div>
+                        </div>
+                    </div>
+                    
+                    <!-- Seriale Section -->
+                    <div class="organizer-section">
+                        <div class="organizer-section-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                            <span>Seriale</span> <i class='bx bx-chevron-down'></i>
+                        </div>
+                        <div class="organizer-section-content halcon-class-list" id="list-machine-serial">
+                            <div class="loading-mini">Caricamento...</div>
+                        </div>
+                    </div>
+                    
+                    <!-- Formato Section -->
+                    <div class="organizer-section">
+                        <div class="organizer-section-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                            <span>Formato</span> <i class='bx bx-chevron-down'></i>
+                        </div>
+                        <div class="organizer-section-content halcon-class-list" id="list-format-type">
+                            <div class="loading-mini">Caricamento...</div>
+                        </div>
+                    </div>
+                    
+                    <!-- Classi (Object Detection) Section -->
+                    <div class="organizer-section">
+                        <div class="organizer-section-header" onclick="this.parentElement.classList.toggle('collapsed')">
+                            <span>Classi (Label)</span> <i class='bx bx-chevron-down'></i>
+                        </div>
+                        <div class="organizer-section-content halcon-class-list" id="halcon-class-list">
+                            <div class="halcon-class-item master-toggle" id="class-toggle-unlabeled" onclick="if(event.target.tagName!=='INPUT' && event.target.tagName!=='LABEL'){const cb=document.getElementById('cb-unlabeled'); cb.checked=!cb.checked;}">
+                                <input type="checkbox" id="cb-unlabeled" class="halcon-cb">
+                                <span class="halcon-color-swatch" style="background: #848cac;"></span>
+                                <label for="cb-unlabeled" class="halcon-class-name">Not Labeled</label>
+                            </div>
+                            <div class="halcon-class-separator"></div>
+                            <div class="halcon-class-item master-toggle" id="class-toggle-all" onclick="if(event.target.tagName!=='INPUT' && event.target.tagName!=='LABEL'){const cb=document.getElementById('cb-any-class'); cb.checked=!cb.checked; cb.dispatchEvent(new Event('change'));}">
+                                <input type="checkbox" id="cb-any-class" class="halcon-cb" checked>
+                                <span class="halcon-color-swatch" style="background: var(--primary-color);"></span>
+                                <label for="cb-any-class" class="halcon-class-name" style="font-weight: 600;">Any Label Class</label>
+                            </div>
+                            <div class="halcon-class-separator"></div>
+                            <div id="halcon-classes-dynamic">
+                                <!-- Populated dynamically -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="organizer-footer">
+                    <button id="btn-apply-filters" class="glass-btn glass-btn-primary" style="flex: 1; padding: 10px; border-radius: 8px; font-weight: 600; cursor: pointer;">
+                        <i class='bx bx-search-alt-2'></i> Applica Filtri
+                    </button>
+                    <button id="btn-clear-filters" class="glass-btn" style="padding: 10px; border-radius: 8px; cursor: pointer; color: #ff4757; border-color: rgba(255,87,87,0.3);" title="Resetta">
+                        <i class='bx bx-reset'></i>
+                    </button>
                 </div>
             </aside>
 
@@ -66,18 +157,20 @@
                             <div style="display: flex; gap: 8px; align-items: center;">
                                 <span id="statusbar-resolution" class="meta-tag"></span>
                                 <span id="statusbar-detmode" class="meta-tag"></span>
-                                <div class="status-actions" style="display: flex; gap: 16px; font-size: 1.2rem; cursor: pointer; margin-left: 16px;">
+                                <div class="status-actions" style="display: flex; gap: 16px; font-size: 1.2rem; cursor: pointer; margin-left: 16px; align-items: center;">
                                     <i class="bx bx-show" id="btn-toggle-boxes" title="Toggle Annotazioni"></i>
                                     <i class="bx bx-target-lock" id="btn-reset-view" title="Reset Vista (Fit Screen)"></i>
-                                    <i class="bx bxs-down-arrow" id="btn-toggle-drawer" title="Statistiche"></i>
+                                    <button id="btn-toggle-drawer" class="glass-btn" style="padding: 6px 12px; border-radius: 6px; font-size: 0.9rem; font-weight: 600; display: flex; align-items: center; gap: 6px; border: 1px solid rgba(0,243,255,0.3); color: #00f3ff; background: rgba(0,243,255,0.05);" title="Mostra Statistiche Dataset">
+                                        <i class="bx bx-pie-chart-alt-2" style="font-size: 1.1rem;"></i> Statistiche <i class="bx bx-chevron-up toggle-icon" style="font-size: 1.1rem;"></i>
+                                    </button>
                                 </div>
                             </div>
                         </div>
-                        <div id="stats-drawer" class="bottom-drawer" style="display: flex; gap: 32px; padding-left: 24px; padding-right: 24px;">
-                            <div style="width: 250px; height: 250px; flex-shrink: 0;">
+                        <div id="stats-drawer" class="bottom-drawer" style="display: flex; gap: 40px;">
+                            <div style="width: 340px; height: 250px; flex-shrink: 0; display: flex; justify-content: center; align-items: center;">
                                 <canvas id="statsChart"></canvas>
                             </div>
-                            <div id="drawer-extra-info" style="flex: 1; display: flex; flex-direction: column; justify-content: center; color: var(--text-muted); font-size: 0.95rem;">
+                            <div id="drawer-extra-info" style="flex: 1; display: flex; flex-direction: column; justify-content: flex-start; color: var(--text-muted); font-size: 0.95rem; overflow-y: auto; height: 100%; padding-right: 16px;">
                                 <!-- Informazioni addizionali qui -->
                             </div>
                         </div>
@@ -95,9 +188,9 @@
         </div>
     </div>
 
-    <!-- Import Modal -->
+    <!-- Import Modal (Wizard) -->
     <div id="import-modal" class="import-modal">
-        <div class="modal-content" style="display: flex; flex-direction: column;">
+        <div class="modal-content" style="width: 1200px; max-width: 90vw; max-height: 85vh; display: flex; flex-direction: column;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
                 <div class="modal-header-title">
                     <i class='bx bx-cloud-upload'></i> Importa Dataset
@@ -105,76 +198,29 @@
                 <button class="icon-btn close-import" style="background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 1.5rem; transition: color 0.2s;"><i class="bx bx-x"></i></button>
             </div>
             
-            <h3 style="margin-top:0; color:var(--text-color); font-size: 1.1rem; margin-bottom: 12px;">Origine Dati</h3>
-            <div style="display: flex; gap: 8px; margin-bottom: 24px;">
-                <div class="custom-autocomplete-container" style="flex: 1;">
-                    <div style="position: relative;">
-                        <i class='bx bx-folder' style="position: absolute; left: 16px; top: 50%; transform: translateY(-50%); color: rgba(255,255,255,0.5); font-size: 1.2rem; pointer-events: none;"></i>
-                        <input type="text" id="hdict-select" class="glass-input custom-autocomplete-input" placeholder="Seleziona dizionario..." autocomplete="off" style="width: 100%; padding-left: 48px;">
-                    </div>
-                    <div class="custom-autocomplete-list" id="list-hdicts"></div>
-                </div>
-                <button id="btn-refresh-dicts" class="glass-btn" style="padding: 0 16px; border-radius: 8px; cursor: pointer;" title="Ricarica lista">
-                    <i class="bx bx-refresh" style="font-size: 1.4rem;"></i>
-                </button>
+            <div class="wizard-timeline" id="import-wizard-timeline">
+                <div class="wizard-step active" data-step="1">1. Origine Dati</div>
+                <div class="wizard-step" data-step="2">2. Tipo Controllo</div>
+                <div class="wizard-step" data-step="3">3. Stazione & Seriale</div>
+                <div class="wizard-step" data-step="4">4. Formato & Opzioni</div>
             </div>
-            
-            <div style="height: 1px; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent); margin: 0 0 24px 0;"></div>
-            
-            <h3 style="margin-top:0; color:var(--text-color); font-size: 1.1rem; margin-bottom: 16px;">Classificazione Dataset</h3>
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
-                <div>
-                    <div class="custom-autocomplete-container">
-                        <div style="position: relative;">
-                            <i class='bx bx-sitemap' style="position: absolute; left: 16px; top: 50%; transform: translateY(-50%); color: rgba(255,255,255,0.5); font-size: 1.2rem; pointer-events: none;"></i>
-                            <input type="text" id="tax-control-type" class="glass-input custom-autocomplete-input" placeholder="Tipo di Controllo *" autocomplete="off" style="width: 100%; padding-left: 48px;">
-                        </div>
-                        <div class="custom-autocomplete-list" id="list-control-type"></div>
-                    </div>
-                </div>
-                <div>
-                    <div class="custom-autocomplete-container">
-                        <div style="position: relative;">
-                            <i class='bx bx-current-location' style="position: absolute; left: 16px; top: 50%; transform: translateY(-50%); color: rgba(255,255,255,0.5); font-size: 1.2rem; pointer-events: none;"></i>
-                            <input type="text" id="tax-station" class="glass-input custom-autocomplete-input" placeholder="Stazione *" autocomplete="off" style="width: 100%; padding-left: 48px;">
-                        </div>
-                        <div class="custom-autocomplete-list" id="list-station"></div>
-                    </div>
-                </div>
-                <div>
-                    <div class="custom-autocomplete-container">
-                        <div style="position: relative;">
-                            <i class='bx bx-barcode-reader' style="position: absolute; left: 16px; top: 50%; transform: translateY(-50%); color: rgba(255,255,255,0.5); font-size: 1.2rem; pointer-events: none;"></i>
-                            <input type="text" id="tax-machine-serial" class="glass-input custom-autocomplete-input" placeholder="Seriale Macchina *" autocomplete="off" style="width: 100%; padding-left: 48px;">
-                        </div>
-                        <div class="custom-autocomplete-list" id="list-machine-serial"></div>
-                    </div>
-                </div>
-                <div>
-                    <div class="custom-autocomplete-container">
-                        <div style="position: relative;">
-                            <i class='bx bx-shape-square' style="position: absolute; left: 16px; top: 50%; transform: translateY(-50%); color: rgba(255,255,255,0.5); font-size: 1.2rem; pointer-events: none;"></i>
-                            <input type="text" id="tax-format-type" class="glass-input custom-autocomplete-input" placeholder="Formato *" autocomplete="off" style="width: 100%; padding-left: 48px;">
-                        </div>
-                        <div class="custom-autocomplete-list" id="list-format-type"></div>
-                    </div>
+
+            <div class="modal-body" style="flex: 1; overflow-y: auto; padding: 24px;">
+                <div id="import-step-content">
+                    <!-- Contenuto dinamico dei filtri -->
                 </div>
             </div>
             
-            <div class="input-wrapper" style="margin-bottom: 24px;">
-                <i class='bx bx-info-circle'></i>
-                <input type="text" id="tax-matricola" placeholder="Matricola / Lotto / Commento (Opzionale)" autocomplete="off">
+            <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(255,255,255,0.1); padding-top: 16px;">
+                <div id="import-status" style="font-size: 0.9rem; color: var(--text-muted); flex: 1; padding-right: 16px;"></div>
+                <div style="display: flex; gap: 12px;">
+                    <button class="glass-btn" id="btn-import-prev" style="display: none; padding: 10px 24px; border-radius: 8px;">Indietro</button>
+                    <button class="glass-btn glass-btn-primary" id="btn-import-next" style="display: none; padding: 10px 24px; border-radius: 8px;">Avanti</button>
+                    <button id="btn-execute-import" class="glass-btn glass-btn-primary" style="display: none; padding: 10px 24px; border-radius: 8px; font-weight: bold; background: rgba(0, 243, 255, 0.2); border: 1px solid #00f3ff; color: #00f3ff; box-shadow: 0 0 15px rgba(0,243,255,0.3); align-items: center; gap: 8px;">
+                        <i class='bx bx-rocket'></i> Esegui Import
+                    </button>
+                </div>
             </div>
-            
-            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; margin-bottom: 32px; padding: 12px; background: rgba(239, 68, 68, 0.05); border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 8px; transition: background 0.2s;">
-                <input type="checkbox" id="delete-source" style="accent-color: #ef4444; width: 18px; height: 18px; cursor: pointer;">
-                <span style="font-size: 0.9rem; color: #ef4444; font-weight: 500;">Svuota la cartella DropZone al termine dell'importazione</span>
-            </label>
-            
-            <button id="btn-execute-import" class="glass-btn glass-btn-primary" style="width: 100%; padding: 14px; border-radius: 8px; font-weight: 700; font-size: 1.05rem; cursor: pointer; display: flex; justify-content: center; align-items: center; gap: 8px;">
-                <i class='bx bx-rocket'></i> Esegui Import
-            </button>
-            <div id="import-status" style="margin-top: 16px; font-size: 0.9rem; text-align: center; color: var(--text-muted); min-height: 20px;"></div>
         </div>
     </div>
 

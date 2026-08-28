@@ -19,10 +19,10 @@ except ImportError:
     print("WARNING: Pillow (PIL) non installata. Le dimensioni dell'immagine non verranno estratte.")
 
 def compute_sha256(file_path):
-    """Calcola l'hash SHA-256 di un file."""
+    """Calcola l'hash SHA-256 di un file in blocchi più grandi per ridurre latenza di rete."""
     sha256_hash = hashlib.sha256()
     with open(file_path, "rb") as f:
-        for byte_block in iter(lambda: f.read(4096), b""):
+        for byte_block in iter(lambda: f.read(1024 * 1024), b""):
             sha256_hash.update(byte_block)
     return sha256_hash.hexdigest()
 
@@ -201,7 +201,13 @@ def import_hdict(hdict_path_str=None, control_type=None, station=None, machine_s
                 
     files_to_remove = []
     
-    # Primo passaggio: Trova la tassonomia del primo doppione per eventuali ereditarietà o merge
+    hash_cache = {}
+    
+    import tempfile
+    local_temp_dir = Path(tempfile.mkdtemp(prefix="dlvault_local_"))
+    local_file_cache = {}
+    
+    # Primo passaggio: Trova la tassonomia del primo doppione per eventuali ereditarietà o merge per eventuali ereditarietà o merge
     for sample in samples_list:
         if not isinstance(sample, (dict, ha.HHandle)): continue
         original_img_path_val = get_first_valid(sample, ['image_file_name', 'image_path', 'file_name'])
@@ -209,8 +215,14 @@ def import_hdict(hdict_path_str=None, control_type=None, station=None, machine_s
         if not original_img_path_str: continue
         real_source_path = file_cache.get(Path(original_img_path_str).stem)
         if real_source_path:
-            file_hash = compute_sha256(real_source_path)
-            cursor.execute("SELECT upload_date, control_type, station, machine_serial, format_type, matricola_commento FROM images WHERE file_hash = ?", (file_hash,))
+            file_name_only = real_source_path.name
+            if check_only:
+                cursor.execute("SELECT upload_date, control_type, station, machine_serial, format_type, matricola_commento FROM images WHERE file_name = ?", (file_name_only,))
+            else:
+                if real_source_path not in hash_cache:
+                    hash_cache[real_source_path] = compute_sha256(real_source_path)
+                file_hash = hash_cache[real_source_path]
+                cursor.execute("SELECT upload_date, control_type, station, machine_serial, format_type, matricola_commento FROM images WHERE file_hash = ?", (file_hash,))
             existing_record = cursor.fetchone()
             if existing_record:
                 first_old_upload_date = existing_record[0]
@@ -260,18 +272,28 @@ def import_hdict(hdict_path_str=None, control_type=None, station=None, machine_s
             else:
                 folder_class = "MIX"
                 detection_mode = "MULTI_CLASSE"
+            if check_only:
+                cursor.execute("SELECT id, folder_path, upload_date FROM images WHERE file_name = ?", (file_name_only,))
+                existing_record = cursor.fetchone()
+                file_hash = None
+            else:
+                if real_source_path not in hash_cache:
+                    if real_source_path not in local_file_cache:
+                        temp_file_path = local_temp_dir / file_name_only
+                        shutil.copy2(str(real_source_path), str(temp_file_path))
+                        local_file_cache[real_source_path] = temp_file_path
+                    hash_cache[real_source_path] = compute_sha256(local_file_cache[real_source_path])
+                file_hash = hash_cache[real_source_path]
                 
-            file_hash = compute_sha256(real_source_path)
-            
-            img_width, img_height = 0, 0
-            if not check_only and Image is not None:
-                try:
-                    with Image.open(real_source_path) as img:
-                        img_width, img_height = img.size
-                except Exception: pass
-            
-            cursor.execute("SELECT id, folder_path, upload_date FROM images WHERE file_hash = ?", (file_hash,))
-            existing_record = cursor.fetchone()
+                img_width, img_height = 0, 0
+                if Image is not None:
+                    try:
+                        with Image.open(local_file_cache.get(real_source_path, real_source_path)) as img:
+                            img_width, img_height = img.size
+                    except Exception: pass
+                
+                cursor.execute("SELECT id, folder_path, upload_date FROM images WHERE file_hash = ?", (file_hash,))
+                existing_record = cursor.fetchone()
             
             base_dataset_dir = db_path.parent / "dataset_archive"
             if existing_record:
@@ -310,21 +332,14 @@ def import_hdict(hdict_path_str=None, control_type=None, station=None, machine_s
                 if check_only:
                     continue
                     
-                if merge_new_with_old_date and first_old_upload_date:
-                    final_upload_date = first_old_upload_date
-                else:
-                    final_upload_date = upload_date
-                    
+                final_upload_date = upload_date
                 dest_folder = base_dataset_dir / control_type / station / machine_serial / format_type / final_upload_date / folder_class
                 dest_folder.mkdir(parents=True, exist_ok=True)
                 dest_img_path = dest_folder / file_name_only
                 
-                try:
-                    shutil.copy2(real_source_path, dest_img_path)
-                    files_to_remove.append(real_source_path)
-                except Exception as e:
-                    print(f"[ERRORE] Impossibile copiare {real_source_path}: {e}")
-                    continue
+                source_to_copy = local_file_cache.get(real_source_path, real_source_path)
+                shutil.copy2(str(source_to_copy), str(dest_img_path))
+                files_to_remove.append(real_source_path)
                     
                 cursor.execute("""
                     INSERT INTO images (file_hash, folder_path, file_name, matricola_commento, control_type, station, machine_serial, format_type, upload_date, folder_class, detection_mode, timestamp_export, image_width, image_height)
@@ -352,6 +367,7 @@ def import_hdict(hdict_path_str=None, control_type=None, station=None, machine_s
 
     if check_only:
         conn.close()
+        shutil.rmtree(str(local_temp_dir), ignore_errors=True)
         return {"duplicate_count": duplicate_count, "new_count": new_count, "imported": 0, "updated": 0, "bboxes": 0, "cleaned_files": 0}
 
     conn.commit()
@@ -379,6 +395,7 @@ def import_hdict(hdict_path_str=None, control_type=None, station=None, machine_s
                 except Exception: pass
         except Exception as e:
             print(f"\n[ERRORE] Impossibile salvare il file .hdict: {e}")
+            shutil.rmtree(str(local_temp_dir), ignore_errors=True)
             raise
     
     for old_file in files_to_remove:
@@ -386,6 +403,7 @@ def import_hdict(hdict_path_str=None, control_type=None, station=None, machine_s
             if old_file.exists(): old_file.unlink()
         except Exception: pass
 
+    shutil.rmtree(str(local_temp_dir), ignore_errors=True)
     return {
         "imported": imported_images_count,
         "updated": updated_images_count,

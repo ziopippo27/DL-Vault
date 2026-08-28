@@ -11,6 +11,7 @@ def init_db():
     
     # Abilita Write-Ahead Logging per accessi concorrenti
     cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("PRAGMA foreign_keys=ON;")
 
     # Create images table
     cursor.execute("""
@@ -40,6 +41,8 @@ def init_db():
             image_id INTEGER NOT NULL,
             label TEXT NOT NULL,
             class_name TEXT,
+            annotation_type TEXT DEFAULT 'bbox',
+            segmentation_json TEXT,
             row1 REAL NOT NULL,
             col1 REAL NOT NULL,
             row2 REAL NOT NULL,
@@ -47,6 +50,13 @@ def init_db():
             FOREIGN KEY (image_id) REFERENCES images(id) ON DELETE CASCADE
         )
     """)
+    
+    try:
+        cursor.execute("ALTER TABLE bounding_boxes ADD COLUMN annotation_type TEXT DEFAULT 'bbox'")
+        cursor.execute("ALTER TABLE bounding_boxes ADD COLUMN segmentation_json TEXT")
+    except sqlite3.OperationalError:
+        # Le colonne esistono già, procedi oltre
+        pass
 
     # Create performance indexes
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_file_hash ON images(file_hash)")
@@ -81,7 +91,7 @@ def init_db():
     conn.commit()
     conn.close()
     
-    print("Database aggiornato allo schema V2 (Dataset Builder & Indici). Dati preesistenti salvaguardati.")
+    print("Database aggiornato allo schema V3 (Dataset Builder, Indici e Supporto Segmentazione).")
 
 if __name__ == "__main__":
     init_db()
