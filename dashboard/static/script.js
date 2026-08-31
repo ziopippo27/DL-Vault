@@ -18,7 +18,8 @@ document.addEventListener('click', (e) => {
 let showBoxes = true;
 let statsChartInstance = null;
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+    await initClassColors();
     fetchTaxonomy();
     setupModal();
     setupTreeSearch();
@@ -33,7 +34,17 @@ function setupViewerStaticEvents() {
         if (e.target.id === 'btn-toggle-boxes') {
             showBoxes = !showBoxes;
             e.target.className = showBoxes ? 'bx bx-show' : 'bx bx-hide';
-            renderSingleImage(currentSelectedIndex, true);
+            
+            const singleView = document.getElementById('single-view');
+            if (singleView && singleView.style.display !== 'none') {
+                renderSingleImage(currentSelectedIndex, true);
+            }
+            
+            document.querySelectorAll('.masonry-card img').forEach(img => {
+                const url = new URL(img.src, window.location.origin);
+                url.searchParams.set('draw_boxes', showBoxes);
+                img.src = url.toString();
+            });
         } else if (e.target.closest('#btn-toggle-drawer')) {
             const drawer = document.getElementById('stats-drawer');
             const btn = e.target.closest('#btn-toggle-drawer');
@@ -159,6 +170,33 @@ const HALCON_CLASS_COLORS = [
     '#9a6324', '#aaffc3', '#808000', '#ffd8b1', '#000075'
 ];
 
+let classColorMap = {};
+
+async function initClassColors() {
+    try {
+        const res = await fetch('/api/taxonomy-options');
+        const data = await res.json();
+        if (data.status === 'success' && data.options && data.options.class_name) {
+            data.options.class_name.forEach((cls, idx) => {
+                classColorMap[cls] = HALCON_CLASS_COLORS[idx % HALCON_CLASS_COLORS.length];
+            });
+        }
+    } catch (e) {
+        console.error('Error init class colors:', e);
+    }
+}
+
+function getClassColor(className) {
+    if (!className) return 'rgba(255,255,255,0.2)';
+    if (!classColorMap[className]) {
+        const idx = Object.keys(classColorMap).length;
+        classColorMap[className] = HALCON_CLASS_COLORS[idx % HALCON_CLASS_COLORS.length];
+    }
+    return classColorMap[className];
+}
+
+function renderStatsBlock(statsData) {}
+
 function setupAdvancedFilters() {
     const btnToggle = document.getElementById('btn-toggle-filters');
     const panel = document.getElementById('advanced-filters-panel');
@@ -250,7 +288,7 @@ function setupAdvancedFilters() {
         if (!dynamicContainer) return;
         dynamicContainer.innerHTML = '';
         classes.forEach((cls, i) => {
-            const color = HALCON_CLASS_COLORS[i % HALCON_CLASS_COLORS.length];
+            const color = getClassColor(cls);
             const id = `cb-class-${i}`;
             
             const item = document.createElement('div');
@@ -408,32 +446,49 @@ function setupAdvancedFilters() {
                     const stats = document.getElementById('gallery-stats');
                     stats.textContent = `${images.length} immagini trovate`;
                     
-                    const imageList = document.getElementById('image-list');
+                    const imageList = document.getElementById('masonry-view');
+                    const sidebarList = document.getElementById('image-list');
                     const emptyState = document.getElementById('viewer-empty-state');
                     
                     if (images.length === 0) {
                         emptyState.style.display = 'block';
                         emptyState.textContent = 'Nessuna immagine corrisponde ai filtri.';
-                        document.getElementById('viewport-card').style.display = 'none';
-                        imageList.innerHTML = '<div class="empty-state" style="padding: 16px;">Nessun risultato</div>';
+                        document.getElementById('single-view').style.display = 'none';
+                        imageList.style.display = 'none';
+                        if(sidebarList) sidebarList.innerHTML = '<div class="empty-state" style="padding: 16px;">Nessun risultato</div>';
                         updateChart();
                         return;
                     }
                     
                     imageList.innerHTML = '';
+                    if(sidebarList) sidebarList.innerHTML = '';
+                    
+                    emptyState.style.display = 'none';
+                    document.getElementById('single-view').style.display = 'none';
+                    imageList.style.display = 'grid'; // ensure it's shown
+                    
                     images.forEach((img, index) => {
-                        const item = document.createElement('div');
-                        item.className = 'image-list-item';
-                        item.title = img.file_name;
-                        item.id = `img-item-${index}`;
-                        item.onclick = () => renderSingleImage(index);
+                        // 1) Masonry Card
+                        const card = document.createElement('div');
+                        card.className = 'masonry-card';
+                        card.title = img.file_name;
+                        card.id = `grid-item-${index}`;
+                        card.onclick = () => selectImage(index);
+                        card.ondblclick = () => renderSingleImage(index);
                         
-                        const textSpan = document.createElement('span');
-                        textSpan.textContent = `Sample #${String(index + 1).padStart(3, '0')}`;
+                        const imgEl = document.createElement('img');
+                        imgEl.src = `/api/render/${img.id}?draw_boxes=${showBoxes}`;
+                        imgEl.loading = 'lazy';
                         
-                        const badgeContainer = document.createElement('div');
-                        badgeContainer.style.display = 'flex';
-                        badgeContainer.style.gap = '8px';
+                        const overlay = document.createElement('div');
+                        overlay.className = 'masonry-card-overlay';
+                        
+                        const title = document.createElement('div');
+                        title.className = 'masonry-card-title';
+                        title.textContent = img.file_name;
+                        
+                        const badges = document.createElement('div');
+                        badges.className = 'masonry-card-badges';
                         
                         const badgeSpan = document.createElement('span');
                         badgeSpan.className = 'meta-tag';
@@ -442,17 +497,74 @@ function setupAdvancedFilters() {
                         const badgeSpan2 = document.createElement('span');
                         badgeSpan2.className = 'meta-tag';
                         const detMode = ['UNANNOTATED', 'NESSUNA_ANNOTAZIONE', 'RAW', 'UNLABELED'].includes(img.detection_mode) ? 'RAW' : 'LBL';
-                        badgeSpan2.textContent = detMode;
-                        badgeSpan2.style.backgroundColor = detMode === 'RAW' ? 'rgba(255,255,255,0.1)' : 'rgba(3, 243, 255, 0.2)';
+                        if (detMode === 'LBL') {
+                            const cName = img.folder_class || 'LBL';
+                            const color = getClassColor(cName);
+                            badgeSpan2.textContent = cName;
+                            badgeSpan2.style.backgroundColor = `${color}33`; // 20% opacity
+                            badgeSpan2.style.color = color;
+                            badgeSpan2.style.borderColor = color;
+                            badgeSpan2.style.border = `1px solid ${color}`;
+                        } else {
+                            badgeSpan2.textContent = 'RAW';
+                            badgeSpan2.style.backgroundColor = 'rgba(255,255,255,0.1)';
+                        }
                         
-                        badgeContainer.appendChild(badgeSpan);
-                        badgeContainer.appendChild(badgeSpan2);
-                        item.appendChild(textSpan);
-                        item.appendChild(badgeContainer);
-                        imageList.appendChild(item);
+                        badges.appendChild(badgeSpan);
+                        badges.appendChild(badgeSpan2);
+                        
+                        overlay.appendChild(title);
+                        overlay.appendChild(badges);
+                        
+                        card.appendChild(imgEl);
+                        card.appendChild(overlay);
+                        
+                        imageList.appendChild(card);
+                        
+                        // 2) Sidebar List Item
+                        if(sidebarList) {
+                            const item = document.createElement('div');
+                            item.className = 'image-list-item';
+                            item.title = img.file_name;
+                            item.id = `list-item-${index}`;
+                            item.onclick = () => selectImage(index);
+                            item.ondblclick = () => renderSingleImage(index);
+                            
+                            const textSpan = document.createElement('span');
+                            textSpan.textContent = `Sample #${String(index + 1).padStart(3, '0')}`;
+                            
+                            const sBadges = document.createElement('div');
+                            sBadges.style.display = 'flex';
+                            sBadges.style.gap = '8px';
+                            
+                            const sb1 = document.createElement('span');
+                            sb1.className = 'meta-tag';
+                            sb1.textContent = `${img.width || '?'}x${img.height || '?'}`;
+                            
+                            const sb2 = document.createElement('span');
+                            sb2.className = 'meta-tag';
+                            if (detMode === 'LBL') {
+                                const cName = img.folder_class || 'LBL';
+                                const color = getClassColor(cName);
+                                sb2.textContent = cName;
+                                sb2.style.backgroundColor = `${color}33`;
+                                sb2.style.color = color;
+                                sb2.style.borderColor = color;
+                                sb2.style.border = `1px solid ${color}`;
+                            } else {
+                                sb2.textContent = 'RAW';
+                                sb2.style.backgroundColor = 'rgba(255,255,255,0.1)';
+                            }
+                            
+                            sBadges.appendChild(sb1);
+                            sBadges.appendChild(sb2);
+                            item.appendChild(textSpan);
+                            item.appendChild(sBadges);
+                            
+                            sidebarList.appendChild(item);
+                        }
                     });
                     
-                    renderSingleImage(0);
                     updateChart();
                     
                 } else {
@@ -493,21 +605,37 @@ function setupFilters() {
             target.classList.add('active');
             
             const filter = target.getAttribute('data-filter');
-            const items = document.querySelectorAll('.image-list-item');
+            const items = document.querySelectorAll('.masonry-card, .image-list-item');
             
             items.forEach(item => {
                 if (filter === 'ALL') {
-                    item.style.display = 'flex';
+                    // ripristina la visualizzazione in base al tipo
+                    if(item.classList.contains('masonry-card')) {
+                        item.style.display = 'block';
+                    } else {
+                        item.style.display = 'flex';
+                    }
                 } else {
                     // Cerca il meta-tag che contiene LBL o RAW
                     const tags = item.querySelectorAll('.meta-tag');
-                    let hasTag = false;
+                    let isRaw = false;
                     tags.forEach(t => {
-                        if (t.textContent === filter) hasTag = true;
+                        if (t.textContent === 'RAW') isRaw = true;
                     });
                     
+                    let hasTag = false;
+                    if (filter === 'RAW') {
+                        hasTag = isRaw;
+                    } else if (filter === 'LBL') {
+                        hasTag = !isRaw;
+                    }
+                    
                     if (hasTag) {
-                        item.style.display = 'flex';
+                        if(item.classList.contains('masonry-card')) {
+                            item.style.display = 'block';
+                        } else {
+                            item.style.display = 'flex';
+                        }
                     } else {
                         item.style.display = 'none';
                     }
@@ -734,29 +862,48 @@ async function fetchImages(pathData) {
 
         stats.textContent = `${images.length} immagini trovate`;
 
+        const imageList = document.getElementById('masonry-view');
+        const sidebarList = document.getElementById('image-list');
+        
         if (images.length === 0) {
+            emptyState.style.display = 'block';
             emptyState.textContent = 'Nessuna immagine in questa cartella.';
-            imageList.innerHTML = '<div class="empty-state" style="padding: 16px;">Nessuna immagine</div>';
+            document.getElementById('single-view').style.display = 'none';
+            imageList.style.display = 'none';
+            if(sidebarList) sidebarList.innerHTML = '<div class="empty-state" style="padding: 16px;">Nessuna immagine</div>';
             updateChart();
             return;
         }
 
         imageList.innerHTML = '';
+        if(sidebarList) sidebarList.innerHTML = '';
+        
+        emptyState.style.display = 'none';
+        document.getElementById('single-view').style.display = 'none';
+        imageList.style.display = 'grid'; // ensure it's shown
+
         images.forEach((img, index) => {
-            const item = document.createElement('div');
-            item.className = 'image-list-item';
+            // 1) Masonry Card
+            const card = document.createElement('div');
+            card.className = 'masonry-card';
+            card.title = img.file_name;
+            card.id = `grid-item-${index}`;
+            card.onclick = () => selectImage(index);
+            card.ondblclick = () => renderSingleImage(index);
             
-            const sampleName = `Sample #${String(index + 1).padStart(3, '0')}`;
-            item.title = img.file_name;
-            item.id = `img-item-${index}`;
-            item.onclick = () => renderSingleImage(index);
+            const imgEl = document.createElement('img');
+            imgEl.src = `/api/render/${img.id}?draw_boxes=${showBoxes}`;
+            imgEl.loading = 'lazy';
             
-            const textSpan = document.createElement('span');
-            textSpan.textContent = sampleName;
+            const overlay = document.createElement('div');
+            overlay.className = 'masonry-card-overlay';
             
-            const badgeContainer = document.createElement('div');
-            badgeContainer.style.display = 'flex';
-            badgeContainer.style.gap = '8px';
+            const title = document.createElement('div');
+            title.className = 'masonry-card-title';
+            title.textContent = img.file_name;
+            
+            const badges = document.createElement('div');
+            badges.className = 'masonry-card-badges';
             
             const badgeSpan = document.createElement('span');
             badgeSpan.className = 'meta-tag';
@@ -767,20 +914,74 @@ async function fetchImages(pathData) {
             const badgeSpan2 = document.createElement('span');
             badgeSpan2.className = 'meta-tag';
             const detMode = ['UNANNOTATED', 'NESSUNA_ANNOTAZIONE', 'RAW', 'UNLABELED'].includes(img.detection_mode) ? 'RAW' : 'LBL';
-            badgeSpan2.textContent = detMode;
-            badgeSpan2.style.backgroundColor = detMode === 'RAW' ? 'rgba(255,255,255,0.1)' : 'rgba(3, 243, 255, 0.2)';
+            if (detMode === 'LBL') {
+                const cName = img.folder_class || 'LBL';
+                const color = getClassColor(cName);
+                badgeSpan2.textContent = cName;
+                badgeSpan2.style.backgroundColor = `${color}33`; // 20% opacity
+                badgeSpan2.style.color = color;
+                badgeSpan2.style.borderColor = color;
+                badgeSpan2.style.border = `1px solid ${color}`;
+            } else {
+                badgeSpan2.textContent = 'RAW';
+                badgeSpan2.style.backgroundColor = 'rgba(255,255,255,0.1)';
+            }
             
-            badgeContainer.appendChild(badgeSpan);
-            badgeContainer.appendChild(badgeSpan2);
+            badges.appendChild(badgeSpan);
+            badges.appendChild(badgeSpan2);
             
-            item.appendChild(textSpan);
-            item.appendChild(badgeContainer);
+            overlay.appendChild(title);
+            overlay.appendChild(badges);
             
-            imageList.appendChild(item);
+            card.appendChild(imgEl);
+            card.appendChild(overlay);
+            
+            imageList.appendChild(card);
+            
+            // 2) Sidebar List Item
+            if(sidebarList) {
+                const item = document.createElement('div');
+                item.className = 'image-list-item';
+                item.title = img.file_name;
+                item.id = `list-item-${index}`;
+                item.onclick = () => selectImage(index);
+                item.ondblclick = () => renderSingleImage(index);
+                
+                const textSpan = document.createElement('span');
+                textSpan.textContent = `Sample #${String(index + 1).padStart(3, '0')}`;
+                
+                const sBadges = document.createElement('div');
+                sBadges.style.display = 'flex';
+                sBadges.style.gap = '8px';
+                
+                const sb1 = document.createElement('span');
+                sb1.className = 'meta-tag';
+                sb1.textContent = `${w}x${h}`;
+                
+                const sb2 = document.createElement('span');
+                sb2.className = 'meta-tag';
+                if (detMode === 'LBL') {
+                    const cName = img.folder_class || 'LBL';
+                    const color = getClassColor(cName);
+                    sb2.textContent = cName;
+                    sb2.style.backgroundColor = `${color}33`;
+                    sb2.style.color = color;
+                    sb2.style.borderColor = color;
+                    sb2.style.border = `1px solid ${color}`;
+                } else {
+                    sb2.textContent = 'RAW';
+                    sb2.style.backgroundColor = 'rgba(255,255,255,0.1)';
+                }
+                
+                sBadges.appendChild(sb1);
+                sBadges.appendChild(sb2);
+                item.appendChild(textSpan);
+                item.appendChild(sBadges);
+                
+                sidebarList.appendChild(item);
+            }
         });
         
-        // Show first image automatically
-        renderSingleImage(0);
         updateChart();
 
     } catch (error) {
@@ -789,8 +990,15 @@ async function fetchImages(pathData) {
             return;
         }
         console.error('Error fetching images:', error);
-        emptyState.textContent = 'Errore nel caricamento delle immagini.';
-        imageList.innerHTML = '<div class="empty-state" style="padding: 16px;">Errore</div>';
+        const emptyState = document.getElementById('viewer-empty-state');
+        const imageList = document.getElementById('masonry-view');
+        const sidebarList = document.getElementById('image-list');
+        if (emptyState) {
+            emptyState.style.display = 'block';
+            emptyState.textContent = 'Errore nel caricamento delle immagini.';
+        }
+        if (imageList) imageList.style.display = 'none';
+        if (sidebarList) sidebarList.innerHTML = '<div class="empty-state" style="padding: 16px;">Errore</div>';
     }
 }
 
@@ -825,9 +1033,7 @@ function updateChart() {
     const labels = Object.keys(classCounts);
     const data = Object.values(classCounts);
     
-    // Genera una palette di colori tech
-    const palette = ['#00f3ff', '#3b82f6', '#8b5cf6', '#ec4899', '#f43f5e', '#f59e0b', '#10b981', '#848cac'];
-    const backgroundColors = labels.map((_, i) => palette[i % palette.length]);
+    const backgroundColors = labels.map(label => getClassColor(label));
     
     statsChartInstance = new Chart(ctx, {
         type: 'pie',
@@ -932,7 +1138,7 @@ function updateChart() {
     }
 }
 
-function renderSingleImage(indexStr, preserveView = false) {
+function selectImage(indexStr) {
     const index = parseInt(indexStr);
     if(isNaN(index)) return;
     
@@ -941,22 +1147,77 @@ function renderSingleImage(indexStr, preserveView = false) {
     
     currentSelectedIndex = index;
     
-    // Aggiorna la classe active nella lista a destra e fai scroll
-    document.querySelectorAll('.image-list-item').forEach(el => el.classList.remove('active'));
-    const activeItem = document.getElementById(`img-item-${index}`);
-    if (activeItem) {
-        activeItem.classList.add('active');
-        activeItem.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    document.querySelectorAll('.masonry-card, .image-list-item').forEach(el => el.classList.remove('active'));
+    
+    const activeGridItem = document.getElementById(`grid-item-${index}`);
+    if (activeGridItem) {
+        activeGridItem.classList.add('active');
+        // evito scrollIntoView qui per evitare salti improvvisi in galleria al click
+    }
+    
+    const activeListItem = document.getElementById(`list-item-${index}`);
+    if (activeListItem) {
+        activeListItem.classList.add('active');
+        activeListItem.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
     
     const width = img.width || '?';
     const height = img.height || '?';
     const detMode = ['UNANNOTATED', 'NESSUNA_ANNOTAZIONE', 'RAW', 'UNLABELED'].includes(img.detection_mode) ? 'RAW' : 'LBL';
     
-    // Mostra il viewport card e nascondi empty state
+    document.getElementById('statusbar-filename').textContent = img.file_name;
+    document.getElementById('statusbar-resolution').textContent = `${width}x${height}`;
+    
+    const badge = document.getElementById('statusbar-detmode');
+    if (detMode === 'LBL') {
+        const cName = img.folder_class || 'LBL';
+        const color = getClassColor(cName);
+        badge.textContent = cName;
+        badge.style.backgroundColor = `${color}33`;
+        badge.style.color = color;
+        badge.style.borderColor = color;
+        badge.style.border = `1px solid ${color}`;
+    } else {
+        badge.textContent = 'RAW';
+        badge.style.backgroundColor = 'rgba(255,255,255,0.1)';
+        badge.style.color = 'var(--text-color)';
+        badge.style.border = 'none';
+    }
+}
+
+function renderSingleImage(indexStr, preserveView = false) {
+    const index = parseInt(indexStr);
+    if(isNaN(index)) return;
+    
+    const img = currentImages[index];
+    if(!img) return;
+    
+    selectImage(indexStr);
+    
+    // Mostra il single-view e nascondi masonry-view
+    document.getElementById('masonry-view').style.display = 'none';
+    document.getElementById('single-view').style.display = 'flex';
+    document.getElementById('single-view').style.flexDirection = 'column';
+    document.getElementById('single-view').style.flex = '1';
+    document.getElementById('single-view').style.position = 'relative';
+    
+    // Mostra sidebar a destra solo in single-view
+    const rightSidebar = document.getElementById('right-sidebar');
+    if(rightSidebar) rightSidebar.style.display = 'flex';
+    
     document.getElementById('viewer-empty-state').style.display = 'none';
     const card = document.getElementById('viewport-card');
     card.style.display = 'flex';
+    
+    // Configura tasto back
+    const btnBack = document.getElementById('btn-back-to-grid');
+    if(btnBack) {
+        btnBack.onclick = () => {
+            document.getElementById('single-view').style.display = 'none';
+            document.getElementById('masonry-view').style.display = 'grid';
+            if(rightSidebar) rightSidebar.style.display = 'none';
+        };
+    }
     
     // Mostra/Nascondi pulsanti
     const btnPrev = document.getElementById('btn-prev');
@@ -980,14 +1241,6 @@ function renderSingleImage(indexStr, preserveView = false) {
     
     viewerImg.src = `/api/render/${img.id}?draw_boxes=${showBoxes}`;
     viewerImg.alt = img.file_name;
-    
-    // Update status bar
-    document.getElementById('statusbar-filename').textContent = img.file_name;
-    document.getElementById('statusbar-resolution').textContent = `${width}x${height}`;
-    
-    const badge = document.getElementById('statusbar-detmode');
-    badge.textContent = detMode;
-    badge.style.backgroundColor = detMode === 'RAW' ? 'rgba(255,255,255,0.1)' : 'rgba(3, 243, 255, 0.2)';
     
     // Reset Pan & Zoom
     if (!preserveView) {
@@ -1939,3 +2192,5 @@ function renderExportStep(step, options) {
         });
     }
 }
+
+

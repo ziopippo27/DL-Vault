@@ -30,7 +30,7 @@
             </div>
             <div class="header-right" style="justify-content: space-between; padding: 0 16px;">
                 <h2 style="font-size: 1.1rem; margin: 0; white-space: nowrap;">Immagini</h2>
-                <div style="display: flex; align-items: center;">
+                <div style="display: flex; align-items: center; gap: 12px;">
                     <div class="filter-pills">
                         <button class="pill active" data-filter="ALL">All</button>
                         <button class="pill" data-filter="LBL">Lbl</button>
@@ -144,43 +144,54 @@
             </aside>
 
             <!-- Main Content Area -->
-            <main class="main-content">
-                <div id="image-viewer" class="viewer-container">
-                    <div id="viewport-card" class="viewport-card" style="display: none;">
+            <main class="main-content" style="display: flex; flex-direction: column; position: relative;">
+                
+                <!-- A) Masonry Grid View -->
+                <div id="viewer-empty-state" class="empty-state" style="margin-top: 50px;">Seleziona una cartella per visualizzare le immagini</div>
+                <div id="masonry-view" class="masonry-container" style="display: none;">
+                </div>
+
+                <!-- B) Single Image View -->
+                <div id="single-view" class="viewer-container" style="display: none;">
+                    <button id="btn-back-to-grid" class="glass-btn"><i class='bx bx-arrow-back'></i> Torna alla Griglia</button>
+                    <div id="viewport-card" class="viewport-card" style="display: none; height: 100%;">
                         <div class="viewport-image-area">
                             <button id="btn-prev" class="nav-btn left" style="display: none;"><i class="bx bx-chevron-left"></i></button>
                             <button id="btn-next" class="nav-btn right" style="display: none;"><i class="bx bx-chevron-right"></i></button>
                             <img src="" id="viewer-img" class="viewer-img" alt="">
                         </div>
-                        <div class="viewport-statusbar">
-                            <div id="statusbar-filename" style="font-weight: 600; font-size: 1.1rem; color: white;"></div>
-                            <div style="display: flex; gap: 8px; align-items: center;">
-                                <span id="statusbar-resolution" class="meta-tag"></span>
-                                <span id="statusbar-detmode" class="meta-tag"></span>
-                                <div class="status-actions" style="display: flex; gap: 16px; font-size: 1.2rem; cursor: pointer; margin-left: 16px; align-items: center;">
-                                    <i class="bx bx-show" id="btn-toggle-boxes" title="Toggle Annotazioni"></i>
-                                    <i class="bx bx-target-lock" id="btn-reset-view" title="Reset Vista (Fit Screen)"></i>
-                                    <button id="btn-toggle-drawer" class="glass-btn" style="padding: 6px 12px; border-radius: 6px; font-size: 0.9rem; font-weight: 600; display: flex; align-items: center; gap: 6px; border: 1px solid rgba(0,243,255,0.3); color: #00f3ff; background: rgba(0,243,255,0.05);" title="Mostra Statistiche Dataset">
-                                        <i class="bx bx-pie-chart-alt-2" style="font-size: 1.1rem;"></i> Statistiche <i class="bx bx-chevron-up toggle-icon" style="font-size: 1.1rem;"></i>
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                        <div id="stats-drawer" class="bottom-drawer" style="display: flex; gap: 40px;">
-                            <div style="width: 340px; height: 250px; flex-shrink: 0; display: flex; justify-content: center; align-items: center;">
-                                <canvas id="statsChart"></canvas>
-                            </div>
-                            <div id="drawer-extra-info" style="flex: 1; display: flex; flex-direction: column; justify-content: flex-start; color: var(--text-muted); font-size: 0.95rem; overflow-y: auto; height: 100%; padding-right: 16px;">
-                                <!-- Informazioni addizionali qui -->
-                            </div>
+                    </div>
+                </div>
+
+                <div class="viewport-statusbar">
+                    <div id="statusbar-filename" style="font-weight: 600; font-size: 1.1rem; color: white;"></div>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <span id="statusbar-resolution" class="meta-tag"></span>
+                        <span id="statusbar-detmode" class="meta-tag"></span>
+                        <div class="status-actions" style="display: flex; gap: 16px; font-size: 1.2rem; cursor: pointer; margin-left: 16px; align-items: center;">
+                            <i class="bx bx-show" id="btn-toggle-boxes" title="Toggle Annotazioni"></i>
+                            <i class="bx bx-target-lock" id="btn-reset-view" title="Reset Vista (Fit Screen)"></i>
+                            <button id="btn-toggle-drawer" class="glass-btn" style="padding: 6px 12px; border-radius: 6px; font-size: 0.9rem; font-weight: 600; display: flex; align-items: center; gap: 6px; border: 1px solid rgba(0,243,255,0.3); color: #00f3ff; background: rgba(0,243,255,0.05);" title="Mostra Statistiche Dataset">
+                                <i class="bx bx-pie-chart-alt-2" style="font-size: 1.1rem;"></i> Statistiche <i class="bx bx-chevron-down toggle-icon" style="font-size: 1.1rem;"></i>
+                            </button>
                         </div>
                     </div>
-                    <div id="viewer-empty-state" class="empty-state">Seleziona una cartella per visualizzare le immagini</div>
                 </div>
+                
+                <!-- C) Global Stats Drawer -->
+                <div id="stats-drawer" class="bottom-drawer" style="display: flex; gap: 40px;">
+                    <div style="width: 340px; height: 250px; flex-shrink: 0; display: flex; justify-content: center; align-items: center;">
+                        <canvas id="statsChart"></canvas>
+                    </div>
+                    <div id="drawer-extra-info" style="flex: 1; display: flex; flex-direction: column; justify-content: flex-start; color: var(--text-muted); font-size: 0.95rem; overflow-y: auto; height: 100%; padding-right: 16px;">
+                        <!-- Informazioni addizionali qui -->
+                    </div>
+                </div>
+
             </main>
             
             <!-- Right Sidebar (Image List) -->
-            <aside class="right-sidebar glass">
+            <aside id="right-sidebar" class="right-sidebar glass" style="display: none;">
                 <div id="image-list" class="image-list-container">
                     <div class="empty-state" style="padding: 16px;">Nessuna immagine</div>
                 </div>

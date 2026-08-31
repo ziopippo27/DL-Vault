@@ -310,12 +310,15 @@ body {
 
 .viewport-statusbar {
     width: 100%;
-    background-color: var(--card-bg);
-    border-top: 1px solid var(--glass-border);
+    background: rgba(15, 20, 25, 0.6);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
     padding: 12px 24px;
     display: flex;
     justify-content: space-between;
     align-items: center;
+    margin-top: auto;
 }
 
 .empty-state {
@@ -342,8 +345,99 @@ body {
     to { opacity: 1; transform: scale(1); }
 }
 
-/* Right Sidebar (Image List) */
+/* Masonry Grid Styles */
+.masonry-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 16px;
+    padding: 24px;
+    overflow-y: auto;
+    flex: 1;
+    align-content: start;
+}
 
+.masonry-card {
+    position: relative;
+    border-radius: 12px;
+    overflow: hidden;
+    cursor: pointer;
+    background-color: rgba(30, 35, 45, 0.4);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+    height: 200px; /* fixed height for cards */
+}
+
+.masonry-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.4);
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+.masonry-card.active {
+    border-color: #00f3ff;
+    box-shadow: 0 0 0 2px rgba(0, 243, 255, 0.3), 0 10px 20px rgba(0, 243, 255, 0.2);
+    transform: translateY(-4px);
+}
+
+.masonry-card.active::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 12px;
+    box-shadow: inset 0 0 20px rgba(0, 243, 255, 0.2);
+    pointer-events: none;
+}
+
+.masonry-card img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+.masonry-card-overlay {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: linear-gradient(to top, rgba(0,0,0,0.9), transparent);
+    padding: 24px 12px 12px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.masonry-card-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: white;
+}
+
+.masonry-card-badges {
+    display: flex;
+    gap: 6px;
+}
+
+#btn-back-to-grid {
+    position: absolute;
+    top: 16px;
+    left: 16px;
+    z-index: 9999;
+    padding: 8px 16px;
+    border-radius: 8px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    background: rgba(30, 30, 30, 0.9);
+}
+
+/* Right Sidebar (Image List) */
 .right-sidebar {
     width: 300px;
     height: 100%;
@@ -383,13 +477,20 @@ body {
     flex-shrink: 0;
 }
 
+.image-list-item > div {
+    min-width: 0;
+    overflow: hidden;
+    display: flex;
+    justify-content: flex-end;
+}
+
 .image-list-item .meta-tag {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     max-width: 100%;
+    flex-shrink: 1;
 }
-
 
 .image-list-item:hover {
     background-color: rgba(255, 255, 255, 0.05);
@@ -753,6 +854,21 @@ body {
     background: linear-gradient(90deg, rgba(0, 243, 255, 0.1), transparent) !important;
     border-left: 3px solid var(--primary-color);
     border-radius: 0 6px 6px 0;
+}
+
+/* Masonry Card Premium */
+.masonry-card {
+    background: rgba(255, 255, 255, 0.02) !important;
+    border: 1px solid rgba(255, 255, 255, 0.03) !important;
+    border-radius: 12px !important;
+    transition: all 0.2s ease !important;
+}
+
+.masonry-card:hover {
+    background: rgba(255, 255, 255, 0.06) !important;
+    border-color: rgba(255, 255, 255, 0.1) !important;
+    transform: translateY(-4px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
 }
 
 /* Right Sidebar Image List Premium */
